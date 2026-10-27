@@ -13,8 +13,9 @@ var (
 		Help: "Requests served, by route and HTTP status.",
 	}, []string{"route", "status"})
 	Duration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "llmock_request_duration_seconds",
-		Help: "Request duration, by route.",
+		Name:    "llmock_request_duration_seconds",
+		Help:    "Request duration, by route.",
+		Buckets: prometheus.ExponentialBuckets(0.005, 2, 16), // 5ms to ~164s: long streams included
 	}, []string{"route"})
 	InFlight = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "llmock_in_flight_requests",

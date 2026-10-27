@@ -201,7 +201,7 @@ func (p Plan) Stop() (n int, end End) {
 		ok bool
 		e  End
 	}{{p.ErrorAfter, p.ErrorCode != 0, EndError}, {p.FailAfter, true, EndAbort}, {p.HangAfter, true, EndHang}} {
-		if c.ok && c.v >= 0 && c.v <= p.Tokens && (end == EndDone && c.v <= n || c.v < n) {
+		if c.ok && c.v >= 0 && c.v <= p.Tokens && (end == EndDone || c.v < n) {
 			n, end = c.v, c.e
 		}
 	}

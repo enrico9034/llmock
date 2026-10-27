@@ -55,6 +55,14 @@ func TestExtractDirectivesIgnoresNonBlocks(t *testing.T) {
 	}
 }
 
+func TestExtractDirectivesRejectsMalformedBlocks(t *testing.T) {
+	for _, s := range []string{"hi [[mock tokens=5]", "[[mock:tokens=5]]", "[[mocktokens=5]]", "[[mock a=]x]]", "[[mock tokens=1]] [[mock"} {
+		if _, err := ExtractDirectives(s); err == nil || err.Error() != "malformed [[mock ...]] block" {
+			t.Errorf("%q: err = %v", s, err)
+		}
+	}
+}
+
 func TestMergeLaterWins(t *testing.T) {
 	a := Directives{"tokens": "1", "tps": "2"}
 	got := a.Merge(Directives{"tokens": "3"})

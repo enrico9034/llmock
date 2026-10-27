@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -44,9 +45,15 @@ func ParseDirectives(s string) (Directives, error) {
 }
 
 // ExtractDirectives parses every [[mock ...]] block in text, merging in order.
+// A "[[mock" that does not open a well-formed block is an error, so a typo is
+// never silently ignored.
 func ExtractDirectives(text string) (Directives, error) {
 	out := Directives{}
-	for _, m := range blockRe.FindAllStringSubmatch(text, -1) {
+	blocks := blockRe.FindAllStringSubmatch(text, -1)
+	if strings.Count(text, "[[mock") != len(blocks) {
+		return nil, errors.New("malformed [[mock ...]] block")
+	}
+	for _, m := range blocks {
 		d, err := ParseDirectives(m[1])
 		if err != nil {
 			return nil, err

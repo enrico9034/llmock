@@ -181,15 +181,21 @@ func InjectedMessage(code int) string {
 }
 
 // DecodeJSON decodes r's body (capped at limit bytes) into v. It returns 413
-// for an oversized body, 400 for invalid JSON, and 0, nil on success.
+// for an oversized body, 400 for invalid JSON or a field of the wrong type,
+// and 0, nil on success.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, limit int64, v any) (status int, err error) {
 	err = json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v)
 	var tooBig *http.MaxBytesError
+	var badType *json.UnmarshalTypeError
 	switch {
 	case err == nil:
 		return 0, nil
 	case errors.As(err, &tooBig):
 		return http.StatusRequestEntityTooLarge, err
+	case errors.As(err, &badType) && badType.Field == "":
+		return http.StatusBadRequest, errors.New("request body must be a JSON object")
+	case errors.As(err, &badType):
+		return http.StatusBadRequest, fmt.Errorf("invalid type for %q", badType.Field)
 	default:
 		return http.StatusBadRequest, fmt.Errorf("invalid JSON: %w", err)
 	}

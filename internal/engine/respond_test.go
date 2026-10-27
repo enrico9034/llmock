@@ -172,6 +172,24 @@ func TestDecodeJSON(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONTypeErrorNamesField(t *testing.T) {
+	var v struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	for body, want := range map[string]string{
+		`{"model":"m","messages":"x"}`: `invalid type for "messages"`,
+		`{"messages":[{"content":1}]}`: `invalid type for "messages.content"`,
+		`["not","an","object"]`:        "request body must be a JSON object",
+	} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		if st, err := DecodeJSON(httptest.NewRecorder(), r, 1024, &v); st != 400 || err == nil || err.Error() != want {
+			t.Errorf("%s → %d %v", body, st, err)
+		}
+	}
+}
+
 func TestRespondZeroTokensStreamWaitsDelay(t *testing.T) {
 	t0 := time.Now()
 	_, f, _ := run(context.Background(), &Env{}, planOf(t, "tokens=0 delay=30ms"), true)

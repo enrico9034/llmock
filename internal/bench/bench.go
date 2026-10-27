@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -97,9 +98,12 @@ func expectedTokens(cfg Config, d engine.Directives) int {
 // second. Cancelling ctx ends the run early: requests in flight are dropped
 // and the report covers the completed ones.
 func Run(ctx context.Context, cfg Config, progress io.Writer) (*Report, error) {
+	u, err := url.Parse(cfg.URL)
 	switch {
 	case cfg.URL == "":
 		return nil, errors.New("bench: url is required")
+	case err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "":
+		return nil, fmt.Errorf("bench: url %q must be an http:// or https:// URL with a host", cfg.URL)
 	case cfg.API != "openai" && cfg.API != "anthropic":
 		return nil, fmt.Errorf("bench: api %q must be openai or anthropic", cfg.API)
 	case cfg.Users < 1:

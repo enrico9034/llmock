@@ -36,6 +36,15 @@ func TestParseServeBadEnv(t *testing.T) {
 	}
 }
 
+func TestParseServeRejectsNonPositiveMaxBody(t *testing.T) {
+	if _, err := parseServe([]string{"--max-body", "0"}, env(nil)); err == nil {
+		t.Error("--max-body 0 accepted")
+	}
+	if _, err := parseServe(nil, env(map[string]string{"LLMOCK_MAX_BODY": "-1"})); err == nil {
+		t.Error("LLMOCK_MAX_BODY=-1 accepted")
+	}
+}
+
 func TestSplitList(t *testing.T) {
 	if splitList(" , ") != nil || !slices.Equal(splitList(" a, ,b "), []string{"a", "b"}) {
 		t.Fatal("splitList")

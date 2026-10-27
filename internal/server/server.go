@@ -73,6 +73,14 @@ func New(cfg Config, stopping <-chan struct{}) (http.Handler, error) {
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") })
 	mux.Handle("GET /metrics", promhttp.Handler())
+	// Everything else, wrong methods included, is a 404 in provider format.
+	api("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeErr := openai.WriteError
+		if r.Header.Get("anthropic-version") != "" {
+			writeErr = anthropic.WriteError
+		}
+		writeErr(w, http.StatusNotFound, "llmock: no route for "+r.Method+" "+r.URL.Path)
+	}))
 	return mux, nil
 }
 

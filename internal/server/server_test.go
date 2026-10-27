@@ -167,8 +167,12 @@ func TestNewRejectsBadDefaults(t *testing.T) {
 func TestMetricsEndpoint(t *testing.T) {
 	s := srv(t, Config{})
 	do(t, s, "POST", "/v1/chat/completions", chat)
-	if b := readAll(do(t, s, "GET", "/metrics", "")); !strings.Contains(b, `llmock_requests_total{route="POST /v1/chat/completions",status="200"}`) {
+	b := readAll(do(t, s, "GET", "/metrics", ""))
+	if !strings.Contains(b, `llmock_requests_total{route="POST /v1/chat/completions",status="200"}`) {
 		t.Fatal(b)
+	}
+	if !strings.Contains(b, `llmock_request_duration_seconds_bucket{route="POST /v1/chat/completions",le="163.84"}`) {
+		t.Fatal("duration buckets do not reach long streams")
 	}
 }
 
@@ -176,5 +180,28 @@ func TestBodyLimit(t *testing.T) {
 	r := do(t, srv(t, Config{MaxBody: 1024}), "POST", "/v1/chat/completions", `{"model":"m","messages":[{"role":"user","content":"`+strings.Repeat("x", 2048)+`"}]}`)
 	if r.StatusCode != 413 {
 		t.Fatal(r.StatusCode)
+	}
+}
+
+func TestUnknownRouteIsProviderError(t *testing.T) {
+	s := srv(t, Config{})
+	for _, c := range [][2]string{{"POST", "/v1/responses"}, {"GET", "/v1/chat/completions"}} {
+		msg := "llmock: no route for " + c[0] + " " + c[1]
+		r := do(t, s, c[0], c[1], "")
+		if b := strings.TrimSpace(readAll(r)); r.StatusCode != 404 ||
+			b != `{"error":{"message":"`+msg+`","type":"invalid_request_error","param":null,"code":null}}` {
+			t.Errorf("%v → %d %s", c, r.StatusCode, b)
+		}
+		r = do(t, s, c[0], c[1], "", "anthropic-version", "2023-06-01")
+		if b := strings.TrimSpace(readAll(r)); r.StatusCode != 404 ||
+			b != `{"type":"error","error":{"type":"not_found_error","message":"`+msg+`"}}` {
+			t.Errorf("%v anthropic → %d %s", c, r.StatusCode, b)
+		}
+	}
+	if r := do(t, s, "GET", "/health", ""); r.StatusCode != 200 || readAll(r) != "ok" {
+		t.Fatal("health", r.StatusCode)
+	}
+	if r := do(t, s, "GET", "/metrics", ""); r.StatusCode != 200 || !strings.Contains(readAll(r), "llmock_in_flight_requests") {
+		t.Fatal("metrics", r.StatusCode)
 	}
 }

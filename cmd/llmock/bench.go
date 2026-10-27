@@ -47,7 +47,7 @@ func runBench(args []string) int {
 		}
 		return 2
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	r, err := bench.Run(ctx, cfg, os.Stderr)
 	if err != nil {

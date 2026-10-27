@@ -21,8 +21,6 @@ func errorFor(status int, msg string) apiError {
 		code("invalid_api_key")
 	case status == 403:
 		e.Type = "permission_error"
-	case status == 404:
-		code("model_not_found")
 	case status == 413:
 		code("request_too_large")
 	case status == 429:

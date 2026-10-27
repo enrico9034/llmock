@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +82,17 @@ func TestEmbeddingsInputForms(t *testing.T) {
 	}
 	if code, _ := embed(t, `{"model":"e","input":"x [[mock error=503]]"}`); code != 503 {
 		t.Fatal(code)
+	}
+}
+
+func TestEmbeddingsCapsInputItems(t *testing.T) {
+	list := func(n int, item string) string { return strings.TrimSuffix(strings.Repeat(item+",", n), ",") }
+	if code, r := embed(t, `{"model":"e","dimensions":1,"input":[`+list(2048, `"a"`)+`]}`); code != 200 || len(r.Data) != 2048 {
+		t.Fatal(code, len(r.Data))
+	}
+	for _, in := range []string{list(2049, `"a"`), list(2049, `[1]`)} {
+		if code, _ := embed(t, `{"model":"e","input":[`+in+`]}`); code != 400 {
+			t.Error(code)
+		}
 	}
 }

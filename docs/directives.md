@@ -20,9 +20,10 @@ Summarize this please [[mock tokens=500 delay=2s tps=20]]
   syntax without the brackets.
 
 Every mistake is an error, never silently ignored: an unknown key
-(`tokns=5`), a missing value (`tokens`), a value on a flag (`hang=1`) or an
-out-of-range value returns `400` in the provider's error format, naming the
-key:
+(`tokns=5`), a missing value (`tokens`), a value on a flag (`hang=1`), an
+out-of-range value, or a `[[mock` that does not form a complete block
+(`[[mock tokens=5]`, `[[mock:tokens=5]]`) returns `400` in the provider's
+error format, naming the key when there is one:
 
 ```console
 $ curl -s localhost:8080/v1/chat/completions -H 'Content-Type: application/json' \
@@ -112,7 +113,8 @@ is the same on every request.
 `[[mock prompt_tokens=120000]]` reports 120000 prompt (OpenAI) or input
 (Anthropic) tokens whatever the actual prompt, to exercise cost tracking and
 budget limits. It also sets the `count_tokens` answer and the embeddings
-`usage`.
+`usage` for string inputs; token-ID embedding inputs always report one token
+per ID.
 
 ### `delay`
 
@@ -160,10 +162,11 @@ llmock serve --overrides "error=503 error_rate=0.05"
 ### `error_after`
 
 `[[mock tokens=100 error=529 error_after=20]]` on a stream sends the 200
-headers and 20 tokens, then an in-stream error, and closes: Anthropic `event: error`, OpenAI
-`data: {"error": ...}` (no `[DONE]`). This is the failure a gateway can no
-longer retry transparently. Without `error` the status is 500. Non-streaming,
-the error response is sent after the time 20 tokens would take.
+headers and 20 tokens, then an in-stream error, and closes: Anthropic
+`event: error`, OpenAI `data: {"error": ...}` (no `[DONE]`). This is the
+failure a gateway can no longer retry transparently. Without `error` the
+status is 500. Non-streaming, the error response is sent after the time 20
+tokens would take.
 
 ### `fail_after`
 
@@ -225,7 +228,10 @@ last token would have been streamed, `delay + (tokens-1)/tps`.
 Every response that went through a plan carries an `X-LLMock-Plan` header
 with the effective parameters, e.g.
 `tokens=3 prompt_tokens=2 delay=500ms tps=0`. Optional keys appear only when
-set; `error=` appears only when the error is actually injected.
+set. `error=` appears when the request is set to fail: always with `error`
+or `error_after`, and with `error_rate` only on the requests the roll picks.
+An `error_after` larger than the response length still shows `error=`,
+although no error is sent.
 
 ## `max_tokens`
 
@@ -270,4 +276,4 @@ $ curl -s localhost:8080/v1/chat/completions -H 'Content-Type: application/json'
 - Prompt and input tokens are an estimate: `ceil(characters / 4)` for each
   input text (every message, including the system prompt), summed. Token-ID
   embedding inputs count one token per ID. `prompt_tokens` replaces the
-  estimate. Exact tokenizer parity is a non-goal.
+  estimate, except for token-ID embedding inputs. Exact tokenizer parity is a non-goal.

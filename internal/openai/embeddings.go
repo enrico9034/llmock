@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"math"
 	"math/rand/v2"
@@ -15,6 +16,7 @@ import (
 const (
 	defaultDimensions = 1536
 	maxDimensions     = 65536
+	maxInputs         = 2048 // OpenAI's limit on input items per request
 )
 
 type embeddingRequest struct {
@@ -58,6 +60,9 @@ func Embeddings(env *engine.Env) http.HandlerFunc {
 			return
 		case len(items) == 0:
 			WriteError(w, 400, "input must be a string, an array of strings, or token arrays")
+			return
+		case len(items) > maxInputs:
+			WriteError(w, 400, fmt.Sprintf("input must have at most %d items", maxInputs))
 			return
 		case req.Dimensions < 1 || req.Dimensions > maxDimensions:
 			WriteError(w, 400, "dimensions out of range")

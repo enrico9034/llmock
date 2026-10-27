@@ -110,6 +110,10 @@ func TestBenchRejectsBadConfig(t *testing.T) {
 		{URL: "http://x", API: "openai", Users: 1},
 		{URL: "http://x", API: "openai", Users: 0, Requests: 1},
 		{URL: "http://x", API: "openai", Users: 1, Requests: 1, Directives: "tokns=1"},
+		{URL: "localhost:8080", API: "openai", Users: 1, Requests: 1},
+		{URL: "x", API: "openai", Users: 1, Requests: 1},
+		{URL: "ftp://x", API: "openai", Users: 1, Requests: 1},
+		{URL: "http://", API: "openai", Users: 1, Requests: 1},
 	}
 	for _, c := range bad {
 		if _, err := Run(context.Background(), c, io.Discard); err == nil {

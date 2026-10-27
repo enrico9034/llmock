@@ -83,6 +83,9 @@ func parseServe(args []string, getenv func(string) string) (serveOptions, error)
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
+	if o.Server.MaxBody <= 0 {
+		return o, fmt.Errorf("max-body: %d must be a positive number of bytes", o.Server.MaxBody)
+	}
 	o.Server.APIKeys, o.Server.Models = splitList(*keys), splitList(*models)
 	if err := o.LogLevel.UnmarshalText([]byte(*lvl)); err != nil {
 		return o, fmt.Errorf("log-level: %w", err)
@@ -119,6 +122,7 @@ func runServe(args []string) int {
 		slog.Error("server failed", "err", err)
 		return 1
 	case <-ctx.Done():
+		stop() // a second signal now kills the process instead of waiting for the drain
 	}
 	slog.Info("shutting down")
 	close(stopping)

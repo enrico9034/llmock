@@ -18,7 +18,7 @@ The examples call `llmock` on your `PATH`; in a source checkout,
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--url` | required | Base URL, with or without `/v1`. Bench posts to `/v1/chat/completions` or `/v1/messages`. |
+| `--url` | required | Base URL (`http://` or `https://`), with or without `/v1`. Bench posts to `/v1/chat/completions` or `/v1/messages`. |
 | `--api` | `openai` | API flavour: `openai` or `anthropic`. |
 | `--model` | `mock-gpt` | Model name sent in every request. |
 | `--api-key` | empty | Sent as `Authorization: Bearer` (OpenAI) or `x-api-key` (Anthropic). Never written to the report. |
@@ -49,8 +49,8 @@ an outcome, not an input: a slower system under test gets fewer requests.
 - With `--duration`, no request starts after the deadline; requests in
   flight complete, so the elapsed time can exceed `--duration` by up to one
   response time.
-- `Ctrl-C` ends the run early: requests in flight are dropped and the report
-  covers the completed ones.
+- `Ctrl-C` or SIGTERM (e.g. `docker stop`) ends the run early: requests in
+  flight are dropped and the report covers the completed ones.
 
 While running, bench prints one progress line per second to stderr
 (`[  12s] users=50 rps=48 ok=255 failed=0`); the summary goes to stdout.

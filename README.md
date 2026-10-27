@@ -182,10 +182,10 @@ equivalent; flags win over environment variables.
 | `--models` | `LLMOCK_MODELS` | `mock-gpt,mock-claude` | names listed by `/v1/models` (any model name is accepted in requests) |
 | `--rate-limit-rps` | `LLMOCK_RATE_LIMIT_RPS` | `0` | global rate limit in requests/s, `0` = off; over it, 429 with `Retry-After` |
 | `--max-concurrency` | `LLMOCK_MAX_CONCURRENCY` | `0` | max requests in flight, `0` = off; over it, 429 |
-| `--max-body` | `LLMOCK_MAX_BODY` | `10485760` | max request body in bytes; over it, 413 |
+| `--max-body` | `LLMOCK_MAX_BODY` | `10485760` | max request body in bytes, greater than 0; over it, 413 |
 | `--access-log` | `LLMOCK_ACCESS_LOG` | `false` | log every request |
 | `--log-level` | `LLMOCK_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
-| `--shutdown-timeout` | `LLMOCK_SHUTDOWN_TIMEOUT` | `30s` | on SIGTERM/SIGINT, how long in-flight requests may finish |
+| `--shutdown-timeout` | `LLMOCK_SHUTDOWN_TIMEOUT` | `30s` | on SIGTERM/SIGINT, how long in-flight requests may finish; a second signal quits at once |
 
 With Docker, pass environment variables:
 `docker run --rm -p 8080:8080 -e LLMOCK_DEFAULTS="tokens=200 tps=50" llmock`.
@@ -196,12 +196,15 @@ Endpoints, each also served without the `/v1` prefix:
 |-----------------|-----|
 | `POST /v1/chat/completions` | OpenAI chat, stream and non-stream |
 | `POST /v1/completions` | OpenAI legacy completions, stream and non-stream |
-| `POST /v1/embeddings` | OpenAI embeddings: deterministic unit vectors, `dimensions` (default 1536), `float` or `base64` |
+| `POST /v1/embeddings` | OpenAI embeddings: deterministic unit vectors, up to 2048 inputs, `dimensions` (default 1536), `float` or `base64` |
 | `POST /v1/messages` | Anthropic messages, stream and non-stream |
 | `POST /v1/messages/count_tokens` | Anthropic token count |
 | `GET /v1/models` | OpenAI format, or Anthropic format when `anthropic-version` is sent |
 | `GET /health` | liveness, `ok` |
 | `GET /metrics` | Prometheus metrics |
+
+Any other method or path answers 404 in the OpenAI error format, or in the
+Anthropic one when `anthropic-version` is sent.
 
 ## LiteLLM
 
