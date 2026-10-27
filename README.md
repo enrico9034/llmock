@@ -445,3 +445,7 @@ provider encoder (engine.Encoder / StreamEncoder) → JSON body or SSE frames
 
 A new API format is one new adapter package plus its routes:
 [docs/adding-a-provider.md](docs/adding-a-provider.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
