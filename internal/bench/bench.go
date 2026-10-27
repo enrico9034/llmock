@@ -53,9 +53,9 @@ func (s *stats) record(r result, expected int) {
 	}
 	s.tokens += r.tokens
 	s.tokMin, s.tokMax = min(s.tokMin, r.tokens), max(s.tokMax, r.tokens)
-	if expected >= 0 {
+	if expected >= 0 { // check what was delivered, and what was claimed
 		s.checked++
-		if r.tokens != expected {
+		if r.words != expected || r.usage && r.tokens != expected {
 			s.mismatches++
 		}
 	}
@@ -120,6 +120,12 @@ func Run(ctx context.Context, cfg Config, progress io.Writer) (*Report, error) {
 	var next, ok, failed, active atomic.Int64
 	start := time.Now()
 	deadline := start.Add(cfg.Duration)
+	// stop releases users still waiting to ramp up once the run is over.
+	stop := make(chan struct{})
+	halt := sync.OnceFunc(func() { close(stop) })
+	if cfg.Duration > 0 {
+		defer time.AfterFunc(cfg.Duration, halt).Stop()
+	}
 	// ponytail: ~60 KB of histograms per user (600 MB virtual at 10k users); shard stats if that bites
 	users := make([]*stats, cfg.Users)
 	var wg sync.WaitGroup
@@ -131,12 +137,15 @@ func Run(ctx context.Context, cfg Config, progress io.Writer) (*Report, error) {
 			case <-time.After(time.Duration(u) * cfg.Ramp / time.Duration(cfg.Users)):
 			case <-ctx.Done():
 				return
+			case <-stop:
+				return
 			}
 			active.Add(1)
 			defer active.Add(-1)
 			for ctx.Err() == nil {
 				idx := int(next.Add(1) - 1)
 				if cfg.Requests > 0 && idx >= cfg.Requests || cfg.Duration > 0 && !time.Now().Before(deadline) {
+					halt()
 					return
 				}
 				r, counted := rn.do(ctx, idx, s)

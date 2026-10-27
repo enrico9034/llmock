@@ -3,6 +3,7 @@ package bench
 import (
 	"context"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -132,5 +133,49 @@ func TestEndpointAndSuffix(t *testing.T) {
 	}
 	if s := directiveSuffix(Config{}, 3); s != "" {
 		t.Error(s)
+	}
+}
+
+func TestBenchRampStopsWhenRequestsRunOut(t *testing.T) {
+	r := runOK(t, Config{URL: mock(t, ""), API: "openai", Users: 10, Requests: 1, Ramp: 5 * time.Second, Directives: "tokens=1"})
+	if r.Requests != 1 || r.ElapsedSeconds >= 1 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestBenchIntegrityCountsDeliveredWords(t *testing.T) {
+	// 9 words delivered, but usage claims the 10 that were asked for.
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for range 9 {
+			io.WriteString(w, `data: {"choices":[{"delta":{"content":" lorem"}}]}`+"\n\n")
+		}
+		io.WriteString(w, `data: {"choices":[],"usage":{"completion_tokens":10}}`+"\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(s.Close)
+	r := runOK(t, Config{URL: s.URL, API: "openai", Users: 2, Requests: 4, Stream: true, Directives: "tokens=10"})
+	if r.OK != 4 || r.IntegrityChecked != 4 || r.IntegrityMismatches != 4 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestBenchAnthropicStreamIntegrity(t *testing.T) {
+	r := runOK(t, Config{URL: mock(t, ""), API: "anthropic", Users: 2, Requests: 6, Stream: true, Directives: "tokens=10 tps=1000"})
+	if r.OK != 6 || r.IntegrityChecked != 6 || r.IntegrityMismatches != 0 || r.TokensMean != 10 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestWordCount(t *testing.T) {
+	var w wordCount
+	for _, c := range []string{`"Lor"`, `"em ipsum\n"`, `""`, `" "`, `"dolor\tsit"`, `null`, `" \"amet\""`} {
+		var tx text
+		if err := tx.UnmarshalJSON([]byte(c)); err != nil {
+			t.Fatal(err)
+		}
+		w.add(tx)
+	}
+	if w.n != 5 {
+		t.Fatal(w.n)
 	}
 }

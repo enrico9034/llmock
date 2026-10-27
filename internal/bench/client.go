@@ -62,15 +62,97 @@ func requestBody(cfg Config, idx int) []byte {
 	return out
 }
 
+// text is a JSON string tallied in place, without decoding or allocating it.
+// One LLMock token is one whitespace-separated word.
+type text struct {
+	size        int  // raw length; 0 for "" and null
+	words       int  // word starts, the first byte counting when it is not a space
+	lead, trail bool // the text starts / ends with a non-space
+}
+
+func (t *text) UnmarshalJSON(b []byte) error {
+	*t = text{}
+	if len(b) < 2 || b[0] != '"' {
+		return nil // null
+	}
+	b = b[1 : len(b)-1]
+	t.size = len(b)
+	space := true
+	for i := 0; i < len(b); i++ {
+		first := i == 0
+		s := b[i] == ' '
+		if b[i] == '\\' { // valid JSON: an escape is never last
+			i++
+			s = b[i] == 'n' || b[i] == 't' || b[i] == 'r'
+		}
+		if first {
+			t.lead = !s
+		}
+		if space && !s {
+			t.words++
+		}
+		space = s
+	}
+	t.trail = t.size > 0 && !space
+	return nil
+}
+
+// wordCount sums the words of consecutive chunks of one text, joining a word
+// split across two chunks.
+type wordCount struct {
+	n     int
+	trail bool
+}
+
+func (w *wordCount) add(t text) {
+	w.n += t.words
+	if t.lead && w.trail {
+		w.n--
+	}
+	if t.size > 0 {
+		w.trail = t.trail
+	}
+}
+
+// event is the Anthropic event type, matched in place so decoding doesn't allocate.
+type event uint8
+
+const (
+	otherEvent event = iota
+	contentDelta
+	messageStop
+)
+
+func (e *event) UnmarshalJSON(b []byte) error {
+	switch string(b) {
+	case `"content_block_delta"`:
+		*e = contentDelta
+	case `"message_stop"`:
+		*e = messageStop
+	default:
+		*e = otherEvent
+	}
+	return nil
+}
+
 // frame holds the only fields bench reads from a JSON body or SSE data line, for either API.
 type frame struct {
-	Type string `json:"type"` // Anthropic event type
+	Type event `json:"type"` // Anthropic
 	// OpenAI; an array, so decoding doesn't allocate a slice per frame
 	Choices [1]struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content text `json:"content"`
 		} `json:"delta"`
+		Message struct { // non-stream
+			Content text `json:"content"`
+		} `json:"message"`
 	} `json:"choices"`
+	Delta struct { // Anthropic stream
+		Text text `json:"text"`
+	} `json:"delta"`
+	Content []struct { // Anthropic non-stream
+		Text text `json:"text"`
+	} `json:"content"`
 	Usage *struct {
 		CompletionTokens int `json:"completion_tokens"` // OpenAI
 		OutputTokens     int `json:"output_tokens"`     // Anthropic
@@ -94,7 +176,9 @@ type result struct {
 	status  int    // HTTP status, for kind "http"
 	latency time.Duration
 	ttft    time.Duration // streams only; 0 when no content arrived
-	tokens  int
+	tokens  int           // reported usage, else the content-frame count
+	usage   bool          // tokens came from the response's usage
+	words   int           // words of content text actually received
 }
 
 // runner holds what every virtual user shares.
@@ -160,13 +244,18 @@ func (rn *runner) do(ctx context.Context, idx int, s *stats) (result, bool) {
 		if _, err := s.buf.ReadFrom(resp.Body); err != nil || json.Unmarshal(s.buf.Bytes(), &f) != nil {
 			return fail("truncated")
 		}
-		n, _ := f.usageTokens(rn.cfg.API)
-		return result{latency: time.Since(start), tokens: n}, true
+		r := result{latency: time.Since(start), words: f.Choices[0].Message.Content.words}
+		for _, c := range f.Content {
+			r.words += c.Text.words
+		}
+		r.tokens, r.usage = f.usageTokens(rn.cfg.API)
+		return r, true
 	}
 
 	var r result
 	var last time.Time
-	frames, usage, done, streamErr := 0, -1, false, false
+	var words wordCount
+	frames, done, streamErr := 0, false, false
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(nil, 1<<20) // grows from 4 KB up to 1 MB lines
 	// Read to EOF even after the end marker, so the connection is reused.
@@ -185,9 +274,11 @@ func (rn *runner) do(ctx context.Context, idx int, s *stats) (result, bool) {
 		switch {
 		case f.Error != nil:
 			streamErr = true
-		case f.Type == "message_stop":
+		case f.Type == messageStop:
 			done = true
-		case f.Type == "content_block_delta" || f.Choices[0].Delta.Content != "":
+		case f.Type == contentDelta || f.Choices[0].Delta.Content.size > 0:
+			words.add(f.Choices[0].Delta.Content) // only one of the two is ever set
+			words.add(f.Delta.Text)
 			now := time.Now()
 			if frames == 0 {
 				r.ttft = now.Sub(start)
@@ -198,7 +289,7 @@ func (rn *runner) do(ctx context.Context, idx int, s *stats) (result, bool) {
 			frames++
 		}
 		if n, ok := f.usageTokens(rn.cfg.API); ok {
-			usage = n
+			r.tokens, r.usage = n, true
 		}
 	}
 	switch {
@@ -207,10 +298,9 @@ func (rn *runner) do(ctx context.Context, idx int, s *stats) (result, bool) {
 	case sc.Err() != nil || !done:
 		return fail("truncated")
 	}
-	r.latency = time.Since(start)
-	r.tokens = frames // fallback when the stream carried no usage
-	if usage >= 0 {
-		r.tokens = usage
+	r.latency, r.words = time.Since(start), words.n
+	if !r.usage {
+		r.tokens = frames
 	}
 	return r, true
 }
