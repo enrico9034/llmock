@@ -1,0 +1,11 @@
+# Binaries
+/llmock
+/dist/
+
+# Bench reports
+*.report.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
