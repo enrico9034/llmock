@@ -278,7 +278,67 @@ Go runtime and process metrics are exported too.
 
 ## Performance
 
-Numbers are recorded in a later step.
+Targets: 10,000 concurrent streams at `tokens=500 tps=20` (about 200,000 SSE
+writes/s) with each stream's delivered rate within 5% of `tps` and median
+time to first token (TTFT) under 10 ms; 20,000 non-streaming requests/s at
+`tokens=100`; an image under 20 MB; process startup under 100 ms. The runs
+in the table meet all of them; on this shared laptop the per-stream rate
+held in two of four 10,000-stream runs (see the note on variance).
+
+**Setup.** An Apple M1 Pro laptop (8 cores: 6 performance, 2 efficiency;
+16 GB) running Docker in OrbStack with all 8 cores and 8 GB. LLMock runs in
+a container limited to 4 CPUs and `llmock bench` in a second container with
+the other 4, on the same Docker network (no port mapping):
+
+```bash
+docker build -t llmock . && docker network create llmock-perf
+docker run -d --rm --name llmock --network llmock-perf --cpus=4 \
+  --ulimit nofile=200000:200000 llmock serve
+docker run --rm --network llmock-perf --cpus=4 --ulimit nofile=200000:200000 \
+  llmock bench --url http://llmock:8080 --users 10000 --ramp 20s \
+  --duration 90s --stream --directives "tokens=500 tps=20" --timeout 120s
+docker run --rm --network llmock-perf --cpus=4 \
+  llmock bench --url http://llmock:8080 --users 256 --duration 30s \
+  --directives "tokens=100"
+```
+
+| Scenario | Requests | Throughput (run average) | TTFT p50 / p99 | ITL p50 / p99 | LLMock CPU, steady |
+|----------|----------|--------------------------|----------------|---------------|--------------------|
+| Stream, 10,000 users, `tokens=500 tps=20` | 37,541, 0 failed | 163k tok/s | 1.4 / 40 ms | 49.8 / 97 ms | 2.2–2.8 of 4 |
+| Non-stream, 256 users, `tokens=100` | 1,673,992, 0 failed | 55,794 req/s | — | — | 2.6–2.8 of 4 |
+| Stream, 5,000 users, `tokens=500 tps=50` | 42,189, 0 failed | 211k tok/s | 3.0 / 357 ms | 19.5 / 72 ms | 2.6–3.8 of 4 |
+| Stream, 5,000 users, `tokens=500 tps=100` | 79,669, 0 failed | 418k tok/s | 73 / 769 ms | see below | 3.2–4 of 4 |
+
+Run averages include ramp-up and drain; with all 10,000 streams open the
+mock delivers about 200k tok/s. Every response carried exactly 500 (or 100)
+tokens. In the 10,000-stream run shown, the slowest stream took 25.25 s
+against the ideal 24.95 s, so every stream's delivered rate was within 1.2%
+of `tps`. Non-streaming latency was p50 3.4 ms, p99 19 ms.
+
+The `tps=50` and `tps=100` rows are published but not targets. At `tps=100`
+both containers are close to their CPU limits, the client often reads
+several frames in one socket read, and ITL is reported as ~0 ms (p50); the
+end-to-end rate is better read from stream duration: p50 about 5.1 s for
+500 tokens against the ideal 4.99 s.
+
+The laptop's 8 cores are shared with the desktop, so tails vary between
+runs. Across four runs of the 10,000-stream scenario, none failed and the
+medians stayed within TTFT 1.4–3.4 ms and ITL 48.8–49.8 ms. Two runs were
+clean (slowest stream 25.25 s and 25.37 s, TTFT p99 40 ms and 102 ms). The
+other two missed the per-stream target in the tail: p95 stream duration
+stayed within 3.3% of ideal, but p99 was 6% and 19% over it, and TTFT p99
+reached 0.6 s and 1.2 s. In one of those runs LLMock's own
+`llmock_ttft_seconds` put 99.6% of first tokens under 1 ms, and in a clean
+run a light 20-user client beside the full load saw TTFT p99 33 ms against
+102 ms for the 10,000-user client. Both point to CPU contention on the
+shared host and in the load generator rather than in LLMock's request
+handling.
+
+**Image and startup.** The image is 11.4 MB. The native binary answers its
+first `/health` request 7 ms after launch (median of 10 launches on the same
+laptop; on macOS the first launch of a freshly built binary is slower,
+~0.5 s). `docker run` to the first healthy response through a mapped
+port takes 150–200 ms, mostly container creation.
 
 ## Architecture
 
