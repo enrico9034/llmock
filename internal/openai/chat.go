@@ -85,12 +85,16 @@ type chatEncoder struct {
 
 const contentSuffix = `},"logprobs":null,"finish_reason":null}]}` + "\n\n"
 
-func newChatEncoder(model string, includeUsage bool) *chatEncoder {
+func randID(prefix string) string {
 	var b [12]byte
 	for i := range b {
 		b[i] = byte(rand.UintN(256))
 	}
-	e := &chatEncoder{id: "chatcmpl-" + hex.EncodeToString(b[:]), model: model, created: time.Now().Unix(), includeUsage: includeUsage}
+	return prefix + hex.EncodeToString(b[:])
+}
+
+func newChatEncoder(model string, includeUsage bool) *chatEncoder {
+	e := &chatEncoder{id: randID("chatcmpl-"), model: model, created: time.Now().Unix(), includeUsage: includeUsage}
 	mj, _ := json.Marshal(model)
 	e.base = fmt.Sprintf(`{"id":%q,"object":"chat.completion.chunk","created":%d,"model":%s,"system_fingerprint":"fp_llmock"`, e.id, e.created, mj)
 	e.head = e.base
