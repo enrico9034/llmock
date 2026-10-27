@@ -40,12 +40,20 @@ Anthropic-compatible endpoint.
 
 ## Quickstart
 
-With Docker:
+With Docker, using the published image (linux/amd64 and linux/arm64):
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/enrico9034/llmock:latest
+```
+
+Or build it yourself:
 
 ```bash
 docker build -t llmock .
 docker run --rm -p 8080:8080 llmock
 ```
+
+Tagging a commit `vX.Y.Z` publishes `ghcr.io/enrico9034/llmock:X.Y.Z` and `:X.Y`.
 
 Or from source (Go 1.26):
 
