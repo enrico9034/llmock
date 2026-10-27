@@ -1,0 +1,17 @@
+# LiteLLM routes for LLMock. Model names are free-form: LLMock echoes any model.
+model_list:
+  - model_name: mock-gpt
+    litellm_params:
+      model: openai/mock-gpt
+      api_base: http://llmock:8080/v1
+      api_key: dummy
+  - model_name: mock-claude
+    litellm_params:
+      model: anthropic/mock-claude
+      api_base: http://llmock:8080
+      api_key: dummy
+  - model_name: mock-embed
+    litellm_params:
+      model: openai/mock-embed
+      api_base: http://llmock:8080/v1
+      api_key: dummy

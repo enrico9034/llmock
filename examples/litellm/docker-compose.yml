@@ -1,0 +1,20 @@
+# LLMock behind LiteLLM. From the repository root:
+#   docker compose -f examples/litellm/docker-compose.yml up -d --build
+# LLMock answers on :8080, LiteLLM (master key sk-llmock) on :4000.
+services:
+  llmock:
+    build: ../..
+    ports:
+      - "8080:8080"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.5
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: sk-llmock
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "4000:4000"
+    depends_on:
+      - llmock
