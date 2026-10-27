@@ -281,9 +281,9 @@ Go runtime and process metrics are exported too.
 Targets: 10,000 concurrent streams at `tokens=500 tps=20` (about 200,000 SSE
 writes/s) with each stream's delivered rate within 5% of `tps` and median
 time to first token (TTFT) under 10 ms; 20,000 non-streaming requests/s at
-`tokens=100`; an image under 20 MB; process startup under 100 ms. The runs
-in the table meet all of them; on this shared laptop the per-stream rate
-held in two of four 10,000-stream runs (see the note on variance).
+`tokens=100`; an image under 20 MB; process startup under 100 ms. All are
+met except the per-stream rate, which held in two of four 10,000-stream
+runs on this shared laptop (see below).
 
 **Setup.** An Apple M1 Pro laptop (8 cores: 6 performance, 2 efficiency;
 16 GB) running Docker in OrbStack with all 8 cores and 8 GB. LLMock runs in
@@ -294,51 +294,105 @@ the other 4, on the same Docker network (no port mapping):
 docker build -t llmock . && docker network create llmock-perf
 docker run -d --rm --name llmock --network llmock-perf --cpus=4 \
   --ulimit nofile=200000:200000 llmock serve
+
+# streaming: 10,000 users at tps=20
 docker run --rm --network llmock-perf --cpus=4 --ulimit nofile=200000:200000 \
   llmock bench --url http://llmock:8080 --users 10000 --ramp 20s \
   --duration 90s --stream --directives "tokens=500 tps=20" --timeout 120s
+
+# streaming: 5,000 users at tps=50 and tps=100
+for tps in 50 100; do
+  docker run --rm --network llmock-perf --cpus=4 --ulimit nofile=200000:200000 \
+    llmock bench --url http://llmock:8080 --users 5000 --ramp 20s \
+    --duration 90s --stream --directives "tokens=500 tps=$tps" --timeout 120s
+done
+
+# non-streaming
 docker run --rm --network llmock-perf --cpus=4 \
   llmock bench --url http://llmock:8080 --users 256 --duration 30s \
   --directives "tokens=100"
+
+# light probe client, started 25 s into a 10,000-user run
+docker run --rm --network llmock-perf --cpus=0.5 \
+  llmock bench --url http://llmock:8080 --users 20 --duration 60s \
+  --stream --directives "tokens=500 tps=20"
 ```
 
-| Scenario | Requests | Throughput (run average) | TTFT p50 / p99 | ITL p50 / p99 | LLMock CPU, steady |
-|----------|----------|--------------------------|----------------|---------------|--------------------|
-| Stream, 10,000 users, `tokens=500 tps=20` | 37,541, 0 failed | 163k tok/s | 1.4 / 40 ms | 49.8 / 97 ms | 2.2–2.8 of 4 |
-| Non-stream, 256 users, `tokens=100` | 1,673,992, 0 failed | 55,794 req/s | — | — | 2.6–2.8 of 4 |
-| Stream, 5,000 users, `tokens=500 tps=50` | 42,189, 0 failed | 211k tok/s | 3.0 / 357 ms | 19.5 / 72 ms | 2.6–3.8 of 4 |
-| Stream, 5,000 users, `tokens=500 tps=100` | 79,669, 0 failed | 418k tok/s | 73 / 769 ms | see below | 3.2–4 of 4 |
+CPU was sampled during the runs with one of:
 
-Run averages include ramp-up and drain; with all 10,000 streams open the
-mock delivers about 200k tok/s. Every response carried exactly 500 (or 100)
-tokens. In the 10,000-stream run shown, the slowest stream took 25.25 s
-against the ideal 24.95 s, so every stream's delivered rate was within 1.2%
-of `tps`. Non-streaming latency was p50 3.4 ms, p99 19 ms.
+```bash
+while :; do docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}'; done  # runs 1, 3, non-streaming
+docker stats --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}'  # run 2, tps=50, tps=100
+```
+
+The ranges below cover the time all users were active; samples above 400%
+are artifacts of the sampling interval and count as 4 CPUs. Runs 3 and 4
+used a freshly started LLMock.
+
+| Streaming scenario | Requests | Tok/s, run average | TTFT p50 / p99 | ITL p50 / p99 | Stream duration p99 / max (ideal) | LLMock CPU of 4 |
+|--------------------|----------|--------------------|----------------|---------------|-----------------------------------|-----------------|
+| 10,000 users, `tps=20`, run 1 | 37,541, 0 failed | 163k | 1.4 / 40 ms | 49.8 / 97 ms | 25.01 / 25.25 s (24.95) | 2.2–2.8 |
+| 10,000 users, `tps=20`, run 2 | 37,538, 0 failed | 163k | 3.1 / 605 ms | 48.8 / 211 ms | 29.62 / 31.95 s (24.95) | 2.5–4 |
+| 10,000 users, `tps=20`, run 3 | 37,308, 0 failed | 162k | 3.4 / 1,227 ms | 48.8 / 323 ms | 26.55 / 28.13 s (24.95) | 2.3–4 |
+| 10,000 users, `tps=20`, run 4 | 37,459, 0 failed | 163k | 2.0 / 102 ms | 49.8 / 113 ms | 25.01 / 25.37 s (24.95) | not sampled |
+| 5,000 users, `tps=50` | 42,189, 0 failed | 211k | 3.0 / 357 ms | 19.5 / 72 ms | 10.42 / 12.00 s (9.98) | 2.6–4 |
+| 5,000 users, `tps=100` | 79,669, 0 failed | 418k | 73 / 769 ms | 0.0 / 150 ms | 6.03 / 7.19 s (4.99) | 3.3–4 |
+
+Non-streaming, 256 users, `tokens=100`: 1,673,992 requests, 0 failed,
+55,794 req/s, latency p50 3.4 ms and p99 19 ms, LLMock at 2.6–2.8 CPUs.
+
+Every response in every run carried exactly 500 (or 100) tokens. Run
+averages include ramp-up and drain; with all 10,000 streams open the mock
+delivers about 200k tok/s. A stream meets the 5% target at `tps=20` when it
+takes at most 26.26 s. In runs 1 and 4 every stream did (slowest 25.25 s
+and 25.37 s). In runs 2 and 3 the p95 duration was 25.77 s and 25.52 s, but
+p99 was over the limit, so between 1% and 5% of streams missed it.
 
 The `tps=50` and `tps=100` rows are published but not targets. At `tps=100`
 both containers are close to their CPU limits, the client often reads
-several frames in one socket read, and ITL is reported as ~0 ms (p50); the
+several frames in one socket read, and ITL p50 is reported as ~0 ms; the
 end-to-end rate is better read from stream duration: p50 about 5.1 s for
 500 tokens against the ideal 4.99 s.
 
 The laptop's 8 cores are shared with the desktop, so tails vary between
-runs. Across four runs of the 10,000-stream scenario, none failed and the
-medians stayed within TTFT 1.4–3.4 ms and ITL 48.8–49.8 ms. Two runs were
-clean (slowest stream 25.25 s and 25.37 s, TTFT p99 40 ms and 102 ms). The
-other two missed the per-stream target in the tail: p95 stream duration
-stayed within 3.3% of ideal, but p99 was 6% and 19% over it, and TTFT p99
-reached 0.6 s and 1.2 s. In one of those runs LLMock's own
-`llmock_ttft_seconds` put 99.6% of first tokens under 1 ms, and in a clean
-run a light 20-user client beside the full load saw TTFT p99 33 ms against
-102 ms for the 10,000-user client. Both point to CPU contention on the
-shared host and in the load generator rather than in LLMock's request
-handling.
+identical runs. In runs 2 and 3 both containers reached their CPU limits
+in bursts. LLMock's own `llmock_ttft_seconds` for run 3 put 99.6% of first
+tokens under 1 ms after the handler started. During run 4 the light probe
+client saw TTFT p50 0.7 ms and max 33 ms, while the 10,000-user client saw
+p50 2.0 ms and max 234 ms. This points to contention on the shared host,
+with the load generator adding much of the tail; this setup cannot
+separate the two completely.
 
-**Image and startup.** The image is 11.4 MB. The native binary answers its
-first `/health` request 7 ms after launch (median of 10 launches on the same
-laptop; on macOS the first launch of a freshly built binary is slower,
-~0.5 s). `docker run` to the first healthy response through a mapped
-port takes 150–200 ms, mostly container creation.
+**Image and startup.** The image is 11.4 MB
+(`docker image inspect llmock --format '{{.Size}}'`: 11,416,820 bytes). The
+native binary answers its first `/health` request 7 ms after launch (median
+of 10 launches, range 6.4–7.5 ms, on the same laptop; on macOS the first
+launch of a freshly built binary is slower, ~0.5 s). `docker run` to the
+first healthy response through a mapped port takes 150–200 ms, mostly
+container creation:
+
+```bash
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o llmock ./cmd/llmock
+python3 - <<'PY'
+import subprocess, time, urllib.request
+for _ in range(10):
+    t0 = time.perf_counter()
+    p = subprocess.Popen(["./llmock", "serve", "--addr", "127.0.0.1:18082"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    while True:
+        try:
+            urllib.request.urlopen("http://127.0.0.1:18082/health", timeout=0.2).read()
+            break
+        except Exception:
+            time.sleep(0.0005)
+    print("%.1f ms" % ((time.perf_counter() - t0) * 1000))
+    p.terminate(); p.wait()
+PY
+
+/usr/bin/time -p bash -c 'docker run -d --rm --name llmock-start -p 18081:8080 llmock >/dev/null &&
+  until curl -sf localhost:18081/health >/dev/null; do :; done'
+docker stop llmock-start
+```
 
 ## Architecture
 
